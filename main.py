@@ -1,14 +1,26 @@
+from ultralytics import YOLO
 import cv2
 import numpy as np
 import argparse
 import os
 import ast
+import time
+import threading
+import torch
+import pandas as pd
 
 rectangles = []
 current_rectangle = None
 drawing = False
 image = None
 clone = None
+# https://www.youtube.com/watch?v=U7HRKjlXK-Y
+# start the detection and display in real time
+
+# Load Model
+# model = YOLO("yolov5nu.pt")
+# model = torch.hub.load('ultralytics/yolov8', 'yolov8s')
+model = YOLO("yolov8s.pt")
 
 
 def get_rectangles_from_lot(lot_name):
@@ -23,8 +35,8 @@ def get_rectangles_from_lot(lot_name):
                 rectangle = ast.literal_eval(line)
                 rectangles.append(rectangle)
 
-        print("Get rectangles from lot")
-        print(rectangles)
+        # print("Get rectangles from lot")
+        # print(rectangles)
         return rectangles
     except Exception as e:
         print(e)
@@ -35,7 +47,7 @@ def save_rectangles_to_lot(lot_name, rectangles):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
         for rectangle in rectangles:
-            print(rectangle)
+            # print(rectangle)
             f.write(str(rectangle))
             f.write("\n")
 
@@ -81,6 +93,26 @@ def click_and_crop(event, x, y, flags, param):
             rectangles.append(tuple(current_rectangle))
 
 
+# https://docs.ultralytics.com/modes/predict/#plotting-results
+def run_yolo(image):
+    #  results = model.predict(source=image, save=False, show=True, conf=0.3, classes=[])
+    results = model.predict(source=image, save=False, show=True, conf=0.3)
+
+    boxes = results[0].boxes
+    for box in boxes:
+        # Aqui pegar o ponto central das boxes e comparar com as bounding boxes presentes
+        # Na imagem, que foram desenhadas pelo usuario
+        # Se o centro da box estiver dentro de alguma bounding box, entao a vaga esta ocupada
+        # Assim mudamos a cor para verde.
+        box.xyxy
+        print(box.xyxy)
+
+    # for result in results:
+    # print("=as=sa=afs==fsa=saf=afs=")
+    # print(result.boxes)
+    # print("=as=sa=afs==fsa=saf=afs=")
+
+
 def main(args):
     global image, clone, lot_name, rectangles
 
@@ -118,10 +150,35 @@ def main(args):
                 break
 
     else:
-        # start the detection and display in real time
-        pass
+        start_time = time.time()
 
-    print(rectangles)
+        while True:
+            curr_time = time.time()
+            time_elapsed = curr_time - start_time
+            cv2.namedWindow("image")
+            cv2.setMouseCallback("image", click_and_crop)
+            ret, frame = video.read()
+            if not ret:
+                # If the video ends, reset the video capture to the beginning
+                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+            clone = frame.copy()
+            draw_rectangles(frame, rectangles)
+            # cv2.imshow("image", frame)
+            key = cv2.waitKey(1) & 0xFF
+
+            if key == ord("q"):
+                break
+
+            run_yolo(frame)
+            # result = model.predict(source=frame, save=False, show=True)
+            # print("RESULTADO")
+            # print(result)
+            # print("fim resultado")
+            # threading.Thread(target=run_yolo, args=(frame,)).start()
+            # start_time = curr_time
+
+    # print(rectangles)
     save_rectangles_to_lot(lot_name, rectangles)
     video.release()
     cv2.destroyAllWindows()
@@ -143,8 +200,9 @@ if __name__ == "__main__":
     # args = vars(ap.parse_args())
 
     args = {
-        "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video.mp4",
-        "draw": 1,
+        "filepath": "/Users/leonardomosimannconti/computer_vision/BLK-HDPTZ12 Security Camera Parkng Lot Surveillance Video.webm",
+        # "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video.mp4",
+        "draw": 0,
         "name": "pk1",
         "webcam": None
     }
