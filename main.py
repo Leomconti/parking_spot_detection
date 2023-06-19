@@ -2,18 +2,23 @@ from ultralytics import YOLO
 import cv2
 import numpy as np
 import argparse
-import os
 import ast
 import time
-import threading
 import torch
 import pandas as pd
 
-rectangles = []
+points = []
+center_points = []
+shapes = []
 current_rectangle = None
+drawing_lines = []
+
+curr_point = None
+last_point = None
+qtd_points = 0
+curr_line = []
 drawing = False
-image = None
-clone = None
+
 # https://www.youtube.com/watch?v=U7HRKjlXK-Y
 # start the detection and display in real time
 
@@ -23,105 +28,121 @@ clone = None
 model = YOLO("yolov8s.pt")
 
 
-def get_rectangles_from_lot(lot_name):
+def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
+    with open(path, "a+") as f:
+        print(str(shape))
+        f.write(str(shape))
+        f.write("\n")
 
-    rectangles = []
+    return shape
+
+
+def get_shapes_from_lot(lot_name):
+    path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
+    shapes = []
     try:
         with open(path, "r") as f:
             for line in f:
-                line = line.strip()
-                # line example = ((x, y), (x, y))
-                rectangle = ast.literal_eval(line)
-                rectangles.append(rectangle)
+                line = line.strip()  # line example = ((x, y), (x, y) , (x, y), (x, y))
+                shape = ast.literal_eval(line)
+                shape = np.array(shape)
+                # -1 pega o tamanho valor automaticamente
+                shape = shape.reshape((-1, 1, 2))
+                shapes.append(shape)
+        return shapes
 
-        # print("Get rectangles from lot")
-        # print(rectangles)
-        return rectangles
     except Exception as e:
         print(e)
         return []
 
 
-def save_rectangles_to_lot(lot_name, rectangles):
-    path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
-    with open(path, "a+") as f:
-        for rectangle in rectangles:
-            # print(rectangle)
-            f.write(str(rectangle))
-            f.write("\n")
-
-    return rectangles
-
-
-def draw_rectangles(image, rectangles):
-    for rect in rectangles:
-        cv2.rectangle(image, rect[0], rect[1], (0, 255, 0), 2)
+def draw_shapes(image, shapes):
+    for shape in shapes:
+        cv2.polylines(image, [shape], isClosed=True,
+                      color=(0, 255, 0), thickness=2)
     return image
 
 
+def draw_drawing_lines(image, drawing_lines):
+    # draw the starting point too
+    if last_point is not None:
+        cv2.line(image, last_point, curr_point, (0, 255, 0), 2)
+
+    for line in drawing_lines:
+        cv2.line(image, line[0], line[1], (0, 255, 0), 2)
+
+
 def click_and_crop(event, x, y, flags, param):
-    global drawing, image, clone, rectangles, current_rectangle
+    global points, frame, drawing_lines, curr_line, starting_point, curr_point, drawing, last_point
+    curr_point = (x, y)
+    if event == cv2.EVENT_LBUTTONUP:
+        clicked_point = (x, y)
+        points.append(clicked_point)
 
-    # if the left mouse button is clicked, record the starting points and start drawing
-    if event == cv2.EVENT_LBUTTONDOWN:
-        current_rectangle = [(x, y)]
-        drawing = True
+        # to draw lines in "real time"
+        curr_line.append(clicked_point)
+        last_point = clicked_point
 
-    elif event == cv2.EVENT_MOUSEMOVE:
-        if drawing:
-            # Use the clone because the image will be updating with the rectangles
-            image = clone.copy()
-            cv2.rectangle(image, current_rectangle[0], (x, y), (0, 255, 0), 2)
-            cv2.imshow("image", image)
+        # if a line is drawn (2 points), add it to the lines list
+        if len(curr_line) == 2:
+            drawing_lines.append(curr_line)
 
-    # check to see if the left mouse button was released
-    elif event == cv2.EVENT_LBUTTONUP:
-        # record the ending (x, y) coordinates and indicate that the rectangle drawing has finished
-        current_rectangle.append((x, y))
-        drawing = False  # cropping is finished
+            # Se completou o shape cria uma nova linha, sera a cada 3 pois ele completa a ultima
+            if len(drawing_lines) % 3 == 0:
+                curr_line = []
+                last_point = None
 
-        cv2.rectangle(
-            image, current_rectangle[0], current_rectangle[1], (0, 255, 0), 2)
-        clone = image.copy()
-        # Update the clone so when drawing the next rectangle, the previous ones are still there
-        # Show the image with the rectangle for no delay so the user can draw the next rectangle
-        cv2.imshow("image", image)
-        # Add the rectangle to the list of rectangles
-        # Do not append very small rectangles
-        if abs(current_rectangle[0][0] - current_rectangle[1][0]) > 10 and abs(current_rectangle[0][1] - current_rectangle[1][1]) > 10:
-            rectangles.append(tuple(current_rectangle))
+            else:
+                curr_line = [last_point]
+
+        # if there are 4 points, a shape was drawn
+        if len(points) == 4:
+            points_of_shape = np.array(points)
+            # -1 pega o tamanho valor automaticamente
+            points_of_shape = points_of_shape.reshape((-1, 1, 2))
+
+            save_shape_to_lot(lot_name, points)
+            points = []
 
 
-# https://docs.ultralytics.com/modes/predict/#plotting-results
+def check_spots(spots, bounding_boxes):
+    # Aqui farei uma funcao para calcular se a bounding box esta dentro de alguma vaga
+    # Se estiver em uma vaga, a cor da vaga deve mudar para vermelho
+
+    pass
+
+
 def run_yolo(image):
+    global center_points, frame
+    frame = image
     #  results = model.predict(source=image, save=False, show=True, conf=0.3, classes=[])
-    results = model.predict(source=image, save=False, show=True, conf=0.3)
+    results = model.predict(source=frame, save=False, show=False, conf=0.3)
 
     boxes = results[0].boxes
     for box in boxes:
         # Aqui pegar o ponto central das boxes e comparar com as bounding boxes presentes
         # Na imagem, que foram desenhadas pelo usuario
         # Se o centro da box estiver dentro de alguma bounding box, entao a vaga esta ocupada
-        # Assim mudamos a cor para verde.
-        box.xyxy
-        print(box.xyxy)
+        # Assim mudamos a cor para vermelho.
 
-    # for result in results:
-    # print("=as=sa=afs==fsa=saf=afs=")
-    # print(result.boxes)
-    # print("=as=sa=afs==fsa=saf=afs=")
+        box.xyxy
+
+        # center_point = (
+        #     int((box.xyxy[0] + box.xyxy[2]) / 2), int((box.xyxy[1] + box.xyxy[3]) / 2))
+
+        # example of box xyxy = tensor([[169.1242, 376.8954, 221.2360, 423.7949]])
+        print(box.xyxy)
+        # center_points.append(center_point)
 
 
 def main(args):
-    global image, clone, lot_name, rectangles
+    global lot_name, frame
 
     filepath = args["filepath"]
     webcam_index = args["webcam"]
     drawing_mode = args["draw"]
     lot_name = args["name"]
-
-    rectangles = get_rectangles_from_lot(lot_name)
 
     if webcam_index is not None:
         video = cv2.VideoCapture(webcam_index)
@@ -133,53 +154,39 @@ def main(args):
 
     if drawing_mode == 1:
         while True:
+            ret, frame = video.read()
             cv2.namedWindow("image")
             cv2.setMouseCallback("image", click_and_crop)
-            ret, frame = video.read()
             if not ret:
                 # If the video ends, reset the video capture to the beginning
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-            clone = frame.copy()
-            draw_rectangles(frame, rectangles)
+            shapes = get_shapes_from_lot(lot_name)
+            draw_shapes(frame, shapes)
+            draw_drawing_lines(frame, drawing_lines)
+            cv2.imshow("image", frame)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+
+    else:
+        shapes = get_shapes_from_lot(lot_name)
+        while True:
+            ret, frame = video.read()
+            if not ret:
+                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
+
+            run_yolo(frame)
+            draw_shapes(frame, shapes)
             cv2.imshow("image", frame)
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord("q"):
                 break
 
-    else:
-        start_time = time.time()
-
-        while True:
-            curr_time = time.time()
-            time_elapsed = curr_time - start_time
-            cv2.namedWindow("image")
-            cv2.setMouseCallback("image", click_and_crop)
-            ret, frame = video.read()
-            if not ret:
-                # If the video ends, reset the video capture to the beginning
-                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-            clone = frame.copy()
-            draw_rectangles(frame, rectangles)
-            # cv2.imshow("image", frame)
-            key = cv2.waitKey(1) & 0xFF
-
-            if key == ord("q"):
-                break
-
-            run_yolo(frame)
-            # result = model.predict(source=frame, save=False, show=True)
-            # print("RESULTADO")
-            # print(result)
-            # print("fim resultado")
-            # threading.Thread(target=run_yolo, args=(frame,)).start()
-            # start_time = curr_time
-
-    # print(rectangles)
-    save_rectangles_to_lot(lot_name, rectangles)
     video.release()
     cv2.destroyAllWindows()
 
@@ -200,7 +207,7 @@ if __name__ == "__main__":
     # args = vars(ap.parse_args())
 
     args = {
-        "filepath": "/Users/leonardomosimannconti/computer_vision/BLK-HDPTZ12 Security Camera Parkng Lot Surveillance Video.webm",
+        "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video (1).mp4",
         # "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video.mp4",
         "draw": 0,
         "name": "pk1",
