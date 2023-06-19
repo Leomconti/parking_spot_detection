@@ -3,9 +3,6 @@ import cv2
 import numpy as np
 import argparse
 import ast
-import time
-import torch
-import pandas as pd
 
 points = []
 center_points = []
