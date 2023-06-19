@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import argparse
 import ast
+import time
 
 points = []
 center_points = []
@@ -16,6 +17,8 @@ qtd_points = 0
 curr_line = []
 drawing = False
 
+spots_detected = []
+
 # https://www.youtube.com/watch?v=U7HRKjlXK-Y
 # start the detection and display in real time
 
@@ -28,7 +31,6 @@ model = YOLO("yolov8s.pt")
 def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
-        print(str(shape))
         f.write(str(shape))
         f.write("\n")
 
@@ -44,7 +46,7 @@ def get_shapes_from_lot(lot_name):
                 line = line.strip()  # line example = ((x, y), (x, y) , (x, y), (x, y))
                 shape = ast.literal_eval(line)
                 shape = np.array(shape)
-                # -1 pega o tamanho valor automaticamente
+                # -1 pega o tamanho do vetor automaticamente
                 shape = shape.reshape((-1, 1, 2))
                 shapes.append(shape)
         return shapes
@@ -93,7 +95,7 @@ def click_and_crop(event, x, y, flags, param):
             else:
                 curr_line = [last_point]
 
-        # if there are 4 points, a shape was drawn
+        # if there are 4 points, means the shape is drawn
         if len(points) == 4:
             points_of_shape = np.array(points)
             # -1 pega o tamanho valor automaticamente
@@ -107,30 +109,47 @@ def check_spots(spots, bounding_boxes):
     # Aqui farei uma funcao para calcular se a bounding box esta dentro de alguma vaga
     # Se estiver em uma vaga, a cor da vaga deve mudar para vermelho
 
+    # Check for the corresponding bounding box for each spot by checking if one coordinate is inside another,
+    # But as the values may vary, we'll need a function that compares in a range which spot should be the corresponding one
+    result = []
+    # If there's a spot inside the bounding box, change the color of the spot to red
+
+    largest_x = 0
+    lartest_y = 0
+    largest_area = 0
+    for box in bounding_boxes:
+        for spot in spots:
+            # Check if the object is inside the bounding box based on the x and y points
+            # But only checking if all the points are inside the bounding box is not enough, as the bounding box may be bigger than the spot
+            # Or the spot may have been detected outside the box
+            # So we'll need to check which detected spot is the most reasonable to be the corresponding one
+            # In order to not use too much processing in the loop, we'll limit the
+
+            if (spots[0] >= box[0] and spots[1] >= box[1] and spots[2] <= box[2] and spots[3] >= box[3]):
+                break
+
+            # Olhar ipad anotacoes
+            # spot[0]
+
+    return result
+
     pass
 
 
 def run_yolo(image):
-    global center_points, frame
+    print("YOLO RAN AT: ", time.time())
+    global frame, spots_detected
     frame = image
     #  results = model.predict(source=image, save=False, show=True, conf=0.3, classes=[])
     results = model.predict(source=frame, save=False, show=False, conf=0.3)
 
     boxes = results[0].boxes
     for box in boxes:
-        # Aqui pegar o ponto central das boxes e comparar com as bounding boxes presentes
-        # Na imagem, que foram desenhadas pelo usuario
-        # Se o centro da box estiver dentro de alguma bounding box, entao a vaga esta ocupada
-        # Assim mudamos a cor para vermelho.
+        box = box.xyxy.numpy()[0]
+        spots_detected.append([(box[0], box[1]), (box[2], box[3]),
+                               (box[0], box[3]), (box[2], box[1])])
 
-        box.xyxy
-
-        # center_point = (
-        #     int((box.xyxy[0] + box.xyxy[2]) / 2), int((box.xyxy[1] + box.xyxy[3]) / 2))
-
-        # example of box xyxy = tensor([[169.1242, 376.8954, 221.2360, 423.7949]])
-        print(box.xyxy)
-        # center_points.append(center_point)
+    return spots_detected
 
 
 def main(args):
@@ -169,14 +188,23 @@ def main(args):
                 break
 
     else:
+        # Add start time and current time, so it doesn't run yolo each frame
+        first_run = False
+        start_time = time.time()
+        print(start_time)
         shapes = get_shapes_from_lot(lot_name)
         while True:
             ret, frame = video.read()
             if not ret:
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
+            curr_time = time.time()
+            time_elapsed = curr_time - start_time
+            if time_elapsed >= 10 or first_run is False:
+                start_time = curr_time
+                run_yolo(frame)
+                first_run = True
 
-            run_yolo(frame)
             draw_shapes(frame, shapes)
             cv2.imshow("image", frame)
             key = cv2.waitKey(1) & 0xFF
