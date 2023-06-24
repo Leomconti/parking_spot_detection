@@ -4,6 +4,7 @@ import numpy as np
 import argparse
 import ast
 import time
+from shapely.geometry import Polygon
 
 points = []
 center_points = []
@@ -28,6 +29,7 @@ spots_detected = []
 model = YOLO("yolov8s.pt")
 
 
+# OK
 def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
@@ -37,6 +39,7 @@ def save_shape_to_lot(lot_name, shape):
     return shape
 
 
+# OK
 def get_shapes_from_lot(lot_name):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     shapes = []
@@ -60,10 +63,10 @@ def get_shapes_from_lot(lot_name):
         return shapes, colors
 
     except Exception as e:
-        print(e)
         return [], []
 
 
+# OK
 def draw_shapes(image, shapes, colors):
     for i, shape in enumerate(shapes):
         cv2.polylines(image, [shape], isClosed=True,
@@ -73,6 +76,7 @@ def draw_shapes(image, shapes, colors):
     return image
 
 
+# OK
 def draw_spots(image, spots):
     for i, spot in enumerate(spots):
         cv2.rectangle(image, (int(spot[0][0]), int(spot[0][1])), (int(spot[1][0]), int(spot[1][1])), (255, 255, 0), 2)
@@ -80,6 +84,7 @@ def draw_spots(image, spots):
     
     return image
 
+# OK 
 def draw_drawing_lines(image, drawing_lines):
     # draw the starting point too
     if last_point is not None:
@@ -88,7 +93,7 @@ def draw_drawing_lines(image, drawing_lines):
     for line in drawing_lines:
         cv2.line(image, line[0], line[1], (0, 255, 0), 2)
 
-
+# OK
 def click_and_crop(event, x, y, flags, param):
     global points, frame, drawing_lines, curr_line, starting_point, curr_point, drawing, last_point
     curr_point = (x, y)
@@ -121,7 +126,7 @@ def click_and_crop(event, x, y, flags, param):
             save_shape_to_lot(lot_name, points)
             points = []
 
-
+# Ok
 def change_occupied(index, occupied):  #  fix here
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     lines = []
@@ -130,83 +135,60 @@ def change_occupied(index, occupied):  #  fix here
     
     line = lines[index].rstrip('\n')
 
-    line = line[:-1] + occupied
+    line = line[:-1] + str(occupied)
     lines[index] = line + '\n'
 
     with open(path, "w") as f:
         f.writelines(lines)
 
     return True
-        
+
+# OK, i think so
+def sort_points(polygon):
+    polygon.sort(key=lambda point: point[1])
+    top = sorted(polygon[:2], key=lambda point: point[0])     # sort by x
+    bottom = sorted(polygon[2:], key=lambda point: point[0])  # sort by x
+    return [top[0], top[1], bottom[1], bottom[0]] 
+
+# TODO: verify this part:
+def get_iou_poly(p1, p2):
+    p1 = sort_points(p1)
+    p2 = sort_points(p2)
+    poly1 = Polygon(p1)
+    poly2 = Polygon(p2)
+
+    if not poly1.intersects(poly2): # if they don't intersect, return 0
+        return 0
+
+    iou = poly1.intersection(poly2).area / poly1.union(poly2).area
+    return iou
+
+# TODO: verify this part
 def check_spots(spots, drawn_boxes):
-    # Aqui farei uma funcao para calcular se a bounding box esta dentro de alguma vaga
-    # Se estiver em uma vaga, a cor da vaga deve mudar para vermelho
-
-    # Check for the corresponding bounding box for each spot by checking if one coordinate is inside another,
-    # But as the values may vary, we'll need a function that compares in a range which spot should be the corresponding one
-    result = []
-    # If there's a spot inside the bounding box, change the color of the spot to red
-
-
-    for i_box, box in enumerate(drawn_boxes):
-        # As the box is drawn, the points we're going to look are the top left and bottom right, how to get that?
-        # print(box.tolist())
-        box = box.tolist()
-        box = [subitem for sublist in box for subitem in sublist]
+    checked_boxes = []
+    for spot in spots:
+        spot_polygon = [(int(spot[i][0]), int(spot[i][1])) for i in range(4)] # assuming spot has 4 points in clockwise or anticlockwise order
+        # print(spot_polygon)
+        largest_iou = 0
+        index_box = -1
         
-        largest_area = 0
-        index_box = 0
-        index_spot = 0
-        occupied = False
-        for i_spot, spot in enumerate(spots):
-            # Check if the object is inside the bounding box based on the x and y points
-            # But only checking if all the points are inside the bounding box is not enough, as the bounding box may be bigger than the spot
-            # Or the spot may have been detected outside the box
-            # So we'll need to check which detected spot is the most reasonable to be the corresponding one
-            # In order to not use too much processing in the loop, we'll limit the
- 
-            box_x1, box_x2, box_y1, box_y2 = box[0][0], box[1][0], box[0][1], box[1][1]  # 
-            spot_x1, spot_x2, spot_y1, spot_y2 = spot[0][0], spot[1][0], spot[0][1], spot[1][1]  # should be good to go
-            
-            # check if the distance between the box and the spot is greater than 3 times the spot length
-            if box_x1 > 3*spot_x1 or box_x1 < spot_x1/3:
-                continue
+        for i_box, box in enumerate(drawn_boxes):
+            box = box.tolist()
+            box_polygon = [(subitem[0], subitem[1]) for sublist in box for subitem in sublist]
 
-            if box_x2 > spot_x2:
-                # ight = True
-                abs_x = abs(spot_x1 - box_x2)
-            else:
-                # right = False
-                abs_x = abs(box_x1 - spot_x2)
-            if box_y2 > spot_y2:
-                # up = False
-                abs_y = abs(spot_y2 - box_y1)
-            else:
-                # up = True
-                abs_y = abs(box_y2 - spot_y1)                
-
-            area = abs_x * abs_y
-            
-            if area > largest_area:
-                largest_area = area
+            iou = get_iou_poly(box_polygon, spot_polygon)
+            if iou > largest_iou and box not in checked_boxes:
+                largest_iou = iou
                 index_box = i_box
-                index_spot = i_spot
-                occupied = True
-        
-        if occupied:
-            # spots.remove(spots[index_spot])
-            change_occupied(i_box, "1")
-            result.append((index_box, index_spot))
-        
+
+        if index_box >= 0: # threshold can be adjusted depending on use case
+            change_occupied(index_box, 1)
+            checked_boxes.append(drawn_boxes[index_box].tolist())
         else:
-            change_occupied(i_box, "0")
-            result.append((index_box, -1))
-            
-    # print(result)
-    return result
+            change_occupied(index_box, 0)
+    return checked_boxes
 
-
-
+# OK
 def run_yolo(image):
     # print("YOLO RAN AT: ", time.time())
     spots_detected = []
@@ -221,7 +203,7 @@ def run_yolo(image):
 
     return spots_detected
 
-
+# OK
 def main(args):
     global lot_name, frame
 
@@ -277,14 +259,12 @@ def main(args):
                 start_time = curr_time
                 spots = None
                 spots = run_yolo(frame_orig)
-                check_spots(spots, shapes)
+                checked = check_spots(spots, shapes)
+                print(checked)
                 first_run = False
                 
-            # spots = run_yolo(frame)
-            # check_spots(spots, shapes)
             draw_shapes(frame, shapes, colors)
             draw_spots(frame, spots)
-            print("SPOTS: ", len(spots))
             cv2.imshow("image", frame)
             frame = None
             key = cv2.waitKey(1) & 0xFF
