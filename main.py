@@ -31,7 +31,7 @@ model = YOLO("yolov8s.pt")
 def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
-        f.write(str(shape))
+        f.write(str(shape) + " 0")
         f.write("\n")
 
     return shape
@@ -40,28 +40,45 @@ def save_shape_to_lot(lot_name, shape):
 def get_shapes_from_lot(lot_name):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     shapes = []
+    colors = []
     try:
         with open(path, "r") as f:
             for line in f:
-                line = line.strip()  # line example = ((x, y), (x, y) , (x, y), (x, y))
-                shape = ast.literal_eval(line)
+                line_f = line.strip()[:-1]  # line example = ((x, y), (x, y) , (x, y), (x, y)) 0
+                shape = ast.literal_eval(line_f)
                 shape = np.array(shape)
                 # -1 pega o tamanho do vetor automaticamente
                 shape = shape.reshape((-1, 1, 2))
                 shapes.append(shape)
-        return shapes
+                if line[-2] == "1":
+                    color = (0, 0, 255)
+                else:
+                    color = (0, 255, 0)
+                    
+                colors.append(color)
+                
+        return shapes, colors
 
     except Exception as e:
         print(e)
-        return []
+        return [], []
 
 
-def draw_shapes(image, shapes):
-    for shape in shapes:
+def draw_shapes(image, shapes, colors):
+    for i, shape in enumerate(shapes):
         cv2.polylines(image, [shape], isClosed=True,
-                      color=(0, 255, 0), thickness=2)
+                      color=colors[i], thickness=2)
+        cv2.putText(image, f"{i}", (shape[0][0][0], shape[0][0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+
     return image
 
+
+def draw_spots(image, spots):
+    for i, spot in enumerate(spots):
+        cv2.rectangle(image, (int(spot[0][0]), int(spot[0][1])), (int(spot[1][0]), int(spot[1][1])), (255, 255, 0), 2)
+        cv2.putText(image, f"{i}", (int(spot[0][0]), int(spot[0][1])), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+    
+    return image
 
 def draw_drawing_lines(image, drawing_lines):
     # draw the starting point too
@@ -105,7 +122,23 @@ def click_and_crop(event, x, y, flags, param):
             points = []
 
 
-def check_spots(spots, bounding_boxes):
+def change_occupied(index, occupied):  #  fix here
+    path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
+    lines = []
+    with open(path, "r") as f:
+        lines = f.readlines()
+    
+    line = lines[index].rstrip('\n')
+
+    line = line[:-1] + occupied
+    lines[index] = line + '\n'
+
+    with open(path, "w") as f:
+        f.writelines(lines)
+
+    return True
+        
+def check_spots(spots, drawn_boxes):
     # Aqui farei uma funcao para calcular se a bounding box esta dentro de alguma vaga
     # Se estiver em uma vaga, a cor da vaga deve mudar para vermelho
 
@@ -114,34 +147,71 @@ def check_spots(spots, bounding_boxes):
     result = []
     # If there's a spot inside the bounding box, change the color of the spot to red
 
-    largest_x = 0
-    lartest_y = 0
-    largest_area = 0
-    for box in bounding_boxes:
-        for spot in spots:
+
+    for i_box, box in enumerate(drawn_boxes):
+        # As the box is drawn, the points we're going to look are the top left and bottom right, how to get that?
+        # print(box.tolist())
+        box = box.tolist()
+        box = [subitem for sublist in box for subitem in sublist]
+        
+        largest_area = 0
+        index_box = 0
+        index_spot = 0
+        occupied = False
+        for i_spot, spot in enumerate(spots):
             # Check if the object is inside the bounding box based on the x and y points
             # But only checking if all the points are inside the bounding box is not enough, as the bounding box may be bigger than the spot
             # Or the spot may have been detected outside the box
             # So we'll need to check which detected spot is the most reasonable to be the corresponding one
             # In order to not use too much processing in the loop, we'll limit the
+ 
+            box_x1, box_x2, box_y1, box_y2 = box[0][0], box[1][0], box[0][1], box[1][1]  # 
+            spot_x1, spot_x2, spot_y1, spot_y2 = spot[0][0], spot[1][0], spot[0][1], spot[1][1]  # should be good to go
+            
+            # check if the distance between the box and the spot is greater than 3 times the spot length
+            if box_x1 > 3*spot_x1 or box_x1 < spot_x1/3:
+                continue
 
-            if (spots[0] >= box[0] and spots[1] >= box[1] and spots[2] <= box[2] and spots[3] >= box[3]):
-                break
+            if box_x2 > spot_x2:
+                # ight = True
+                abs_x = abs(spot_x1 - box_x2)
+            else:
+                # right = False
+                abs_x = abs(box_x1 - spot_x2)
+            if box_y2 > spot_y2:
+                # up = False
+                abs_y = abs(spot_y2 - box_y1)
+            else:
+                # up = True
+                abs_y = abs(box_y2 - spot_y1)                
 
-            # Olhar ipad anotacoes
-            # spot[0]
-
+            area = abs_x * abs_y
+            
+            if area > largest_area:
+                largest_area = area
+                index_box = i_box
+                index_spot = i_spot
+                occupied = True
+        
+        if occupied:
+            # spots.remove(spots[index_spot])
+            change_occupied(i_box, "1")
+            result.append((index_box, index_spot))
+        
+        else:
+            change_occupied(i_box, "0")
+            result.append((index_box, -1))
+            
+    # print(result)
     return result
 
-    pass
 
 
 def run_yolo(image):
-    print("YOLO RAN AT: ", time.time())
-    global frame, spots_detected
-    frame = image
+    # print("YOLO RAN AT: ", time.time())
+    spots_detected = []
     #  results = model.predict(source=image, save=False, show=True, conf=0.3, classes=[])
-    results = model.predict(source=frame, save=False, show=False, conf=0.3)
+    results = model.predict(source=image, save=False, show=False, conf=0.3, classes=[2, 7])
 
     boxes = results[0].boxes
     for box in boxes:
@@ -178,35 +248,45 @@ def main(args):
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-            shapes = get_shapes_from_lot(lot_name)
-            draw_shapes(frame, shapes)
+            shapes, colors = get_shapes_from_lot(lot_name)
+            draw_shapes(frame, shapes, colors)
             draw_drawing_lines(frame, drawing_lines)
             cv2.imshow("image", frame)
-
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 break
 
     else:
         # Add start time and current time, so it doesn't run yolo each frame
-        first_run = False
+        first_run = True
         start_time = time.time()
-        print(start_time)
-        shapes = get_shapes_from_lot(lot_name)
+
         while True:
-            ret, frame = video.read()
+            shapes, colors = get_shapes_from_lot(lot_name)
+            ret, frame_orig = video.read()
             if not ret:
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
+            
+            frame = frame_orig.copy()
+
+            
             curr_time = time.time()
             time_elapsed = curr_time - start_time
-            if time_elapsed >= 10 or first_run is False:
+            if time_elapsed >= 1 or first_run:
                 start_time = curr_time
-                run_yolo(frame)
-                first_run = True
-
-            draw_shapes(frame, shapes)
+                spots = None
+                spots = run_yolo(frame_orig)
+                check_spots(spots, shapes)
+                first_run = False
+                
+            # spots = run_yolo(frame)
+            # check_spots(spots, shapes)
+            draw_shapes(frame, shapes, colors)
+            draw_spots(frame, spots)
+            print("SPOTS: ", len(spots))
             cv2.imshow("image", frame)
+            frame = None
             key = cv2.waitKey(1) & 0xFF
 
             if key == ord("q"):
