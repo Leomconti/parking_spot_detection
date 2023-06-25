@@ -33,8 +33,7 @@ model = YOLO("yolov8s.pt")
 def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
-        f.write(str(shape) + " 0")
-        f.write("\n")
+        f.write(str(shape) + " 0" + "\n")
 
     return shape
 
@@ -44,6 +43,8 @@ def get_shapes_from_lot(lot_name):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     shapes = []
     colors = []
+    occupied_spots = 0
+    total_spots = 0
     try:
         with open(path, "r") as f:
             for line in f:
@@ -54,16 +55,19 @@ def get_shapes_from_lot(lot_name):
                 shape = shape.reshape((-1, 1, 2))
                 shapes.append(shape)
                 if line[-2] == "1":
+                    occupied_spots += 1
                     color = (0, 0, 255)
                 else:
                     color = (0, 255, 0)
                     
                 colors.append(color)
+                total_spots += 1
                 
-        return shapes, colors
+        return shapes, colors, total_spots, occupied_spots
 
     except Exception as e:
-        return [], []
+        print(e)
+        return shapes, colors, total_spots, occupied_spots
 
 
 # OK
@@ -71,7 +75,7 @@ def draw_shapes(image, shapes, colors):
     for i, shape in enumerate(shapes):
         cv2.polylines(image, [shape], isClosed=True,
                       color=colors[i], thickness=2)
-        cv2.putText(image, f"{i}", (shape[0][0][0], shape[0][0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+        cv2.putText(image, f"{i}", (shape[0][0][0], shape[0][0][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 102), 2)
 
     return image
 
@@ -80,7 +84,7 @@ def draw_shapes(image, shapes, colors):
 def draw_spots(image, spots):
     for i, spot in enumerate(spots):
         cv2.rectangle(image, (int(spot[0][0]), int(spot[0][1])), (int(spot[1][0]), int(spot[1][1])), (255, 255, 0), 2)
-        cv2.putText(image, f"{i}", (int(spot[0][0]), int(spot[0][1])), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        cv2.putText(image, f"{i}", (int(spot[0][0]), int(spot[0][1])), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 102), 2)
     
     return image
 
@@ -203,6 +207,10 @@ def run_yolo(image):
 
     return spots_detected
 
+
+def draw_counter(total_spots, occupied_spots):
+    cv2.putText(frame, f"{occupied_spots}/{total_spots}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 102, 255), 3)
+
 # OK
 def main(args):
     global lot_name, frame
@@ -229,10 +237,12 @@ def main(args):
                 # If the video ends, reset the video capture to the beginning
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
-
-            shapes, colors = get_shapes_from_lot(lot_name)
+            
+            shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
             draw_shapes(frame, shapes, colors)
+            draw_counter(total_spots, occupied_spots)
             draw_drawing_lines(frame, drawing_lines)
+
             cv2.imshow("image", frame)
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
@@ -242,9 +252,9 @@ def main(args):
         # Add start time and current time, so it doesn't run yolo each frame
         first_run = True
         start_time = time.time()
-
+        
         while True:
-            shapes, colors = get_shapes_from_lot(lot_name)
+            shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
             ret, frame_orig = video.read()
             if not ret:
                 video.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -260,10 +270,10 @@ def main(args):
                 spots = None
                 spots = run_yolo(frame_orig)
                 checked = check_spots(spots, shapes)
-                print(checked)
                 first_run = False
                 
             draw_shapes(frame, shapes, colors)
+            draw_counter(total_spots, occupied_spots)
             draw_spots(frame, spots)
             cv2.imshow("image", frame)
             frame = None
@@ -294,9 +304,10 @@ if __name__ == "__main__":
     args = {
         "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video (1).mp4",
         # "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video.mp4",
-        "draw": 0,
+        "draw": 1,
         "name": "pk1",
-        "webcam": None
+        "webcam": None,
+        "images": True
     }
 
     main(args)
