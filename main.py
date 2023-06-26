@@ -1,35 +1,31 @@
-from ultralytics import YOLO
-import cv2
-import numpy as np
-import argparse
-import ast
-import time
-from shapely.geometry import Polygon
+######## Importar as bibliotecas ########
+from ultralytics import YOLO  # Usado para rodar o YOLO de forma rapida e facil
+import cv2  # Usado para trabalhar com imagens
+import numpy as np  # Usado para trabalhar com arrays
+import argparse  # Usado para pegar os argumentos do terminal
+import ast  # Usado para pegar o array da string sem muita complicação
+import time  # Usado para calcular de quanto em quanto tempo rodar o YOLO
+from shapely.geometry import Polygon  # Usado para calcular a intercecção entre dois polígonos
 
+
+######## Declare global variables ########
 points = []
-center_points = []
 shapes = []
-current_rectangle = None
 drawing_lines = []
-
 curr_point = None
 last_point = None
 qtd_points = 0
 curr_line = []
 drawing = False
-
 spots_detected = []
 
-# https://www.youtube.com/watch?v=U7HRKjlXK-Y
-# start the detection and display in real time
 
-# Load Model
-# model = YOLO("yolov5nu.pt")
-# model = torch.hub.load('ultralytics/yolov8', 'yolov8s')
-model = YOLO("yolov8s.pt")
+######## Load Model ########
+model = YOLO("yolov8x.pt")
 
 
-# OK
+######## Functions to get and save to txt file ########
+
 def save_shape_to_lot(lot_name, shape):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     with open(path, "a+") as f:
@@ -38,7 +34,6 @@ def save_shape_to_lot(lot_name, shape):
     return shape
 
 
-# OK
 def get_shapes_from_lot(lot_name):
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     shapes = []
@@ -70,7 +65,7 @@ def get_shapes_from_lot(lot_name):
         return shapes, colors, total_spots, occupied_spots
 
 
-# OK
+######## Drawing Functions ########
 def draw_shapes(image, shapes, colors):
     for i, shape in enumerate(shapes):
         cv2.polylines(image, [shape], isClosed=True,
@@ -80,7 +75,6 @@ def draw_shapes(image, shapes, colors):
     return image
 
 
-# OK
 def draw_spots(image, spots):
     for i, spot in enumerate(spots):
         cv2.rectangle(image, (int(spot[0][0]), int(spot[0][1])), (int(spot[1][0]), int(spot[1][1])), (255, 255, 0), 2)
@@ -88,7 +82,7 @@ def draw_spots(image, spots):
     
     return image
 
-# OK 
+
 def draw_drawing_lines(image, drawing_lines):
     # draw the starting point too
     if last_point is not None:
@@ -97,7 +91,12 @@ def draw_drawing_lines(image, drawing_lines):
     for line in drawing_lines:
         cv2.line(image, line[0], line[1], (0, 255, 0), 2)
 
-# OK
+
+def draw_counter(total_spots, occupied_spots):
+    cv2.putText(frame, f"{occupied_spots}/{total_spots}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 102, 255), 3)
+
+
+######## Analizar o input do mouse ########
 def click_and_crop(event, x, y, flags, param):
     global points, frame, drawing_lines, curr_line, starting_point, curr_point, drawing, last_point
     curr_point = (x, y)
@@ -130,7 +129,8 @@ def click_and_crop(event, x, y, flags, param):
             save_shape_to_lot(lot_name, points)
             points = []
 
-# Ok
+
+######## Modificar o status no txt ########
 def change_occupied(index, occupied):  #  fix here
     path = f"/Users/leonardomosimannconti/computer_vision/parking_spot_detection/spots/{lot_name}.txt"
     lines = []
@@ -147,14 +147,16 @@ def change_occupied(index, occupied):  #  fix here
 
     return True
 
-# OK, i think so
+
+######## Ordenar os pontos para que o póligono seja formado direito
 def sort_points(polygon):
     polygon.sort(key=lambda point: point[1])
-    top = sorted(polygon[:2], key=lambda point: point[0])     # sort by x
-    bottom = sorted(polygon[2:], key=lambda point: point[0])  # sort by x
+    top = sorted(polygon[:2], key=lambda point: point[0])   
+    bottom = sorted(polygon[2:], key=lambda point: point[0])  
     return [top[0], top[1], bottom[1], bottom[0]] 
 
-# TODO: verify this part:
+
+######## Pegar a intercecção entre dois polígonos (carro e vaga) ########
 def get_iou_poly(p1, p2):
     p1 = sort_points(p1)
     p2 = sort_points(p2)
@@ -164,12 +166,16 @@ def get_iou_poly(p1, p2):
     if not poly1.intersects(poly2): # if they don't intersect, return 0
         return 0
 
-    iou = poly1.intersection(poly2).area / poly1.union(poly2).area
+    iou = poly1.intersection(poly2).area / poly1.union(poly2).area  # based on percentage of intersection
+    #  that's good, beacuse of the camera angles, some spots appear bigger os smaller than they actually are
     return iou
 
-# TODO: verify this part
+
+######## Verifica se os carros estão nas vagas e em quais ########
 def check_spots(spots, drawn_boxes):
     checked_boxes = []
+    for i in range(len(drawn_boxes)):
+        change_occupied(i, 0)
     for spot in spots:
         spot_polygon = [(int(spot[i][0]), int(spot[i][1])) for i in range(4)] # assuming spot has 4 points in clockwise or anticlockwise order
         # print(spot_polygon)
@@ -177,6 +183,7 @@ def check_spots(spots, drawn_boxes):
         index_box = -1
         
         for i_box, box in enumerate(drawn_boxes):
+            change_occupied(index_box, 0)
             box = box.tolist()
             box_polygon = [(subitem[0], subitem[1]) for sublist in box for subitem in sublist]
 
@@ -188,17 +195,17 @@ def check_spots(spots, drawn_boxes):
         if index_box >= 0: # threshold can be adjusted depending on use case
             change_occupied(index_box, 1)
             checked_boxes.append(drawn_boxes[index_box].tolist())
-        else:
-            change_occupied(index_box, 0)
+            
     return checked_boxes
 
-# OK
+
+######## Rodar o YOLO ########
 def run_yolo(image):
     # print("YOLO RAN AT: ", time.time())
     spots_detected = []
-    #  results = model.predict(source=image, save=False, show=True, conf=0.3, classes=[])
-    results = model.predict(source=image, save=False, show=False, conf=0.3, classes=[2, 7])
-
+    results = model.predict(source=image, save=False, show=False, conf=0.1, classes=[2, 7])
+    # results = model.predict(source=image, save=False, show=False, conf=0.3)
+    
     boxes = results[0].boxes
     for box in boxes:
         box = box.xyxy.numpy()[0]
@@ -208,10 +215,7 @@ def run_yolo(image):
     return spots_detected
 
 
-def draw_counter(total_spots, occupied_spots):
-    cv2.putText(frame, f"{occupied_spots}/{total_spots}", (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 102, 255), 3)
-
-# OK
+######## Rodar o programa ########
 def main(args):
     global lot_name, frame
 
@@ -219,74 +223,130 @@ def main(args):
     webcam_index = args["webcam"]
     drawing_mode = args["draw"]
     lot_name = args["name"]
-
+    images_path = args["images_path"]
+    
     if webcam_index is not None:
         video = cv2.VideoCapture(webcam_index)
     elif filepath is not None:
         video = cv2.VideoCapture(filepath)
     else:
-        raise Exception(
-            "No video source provided, please enter webcam index or filepath")
+        raise Exception("No video source provided, please enter webcam index or filepath")
 
-    if drawing_mode == 1:
-        while True:
-            ret, frame = video.read()
-            cv2.namedWindow("image")
-            cv2.setMouseCallback("image", click_and_crop)
-            if not ret:
-                # If the video ends, reset the video capture to the beginning
-                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-            
-            shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
-            draw_shapes(frame, shapes, colors)
-            draw_counter(total_spots, occupied_spots)
-            draw_drawing_lines(frame, drawing_lines)
-
-            cv2.imshow("image", frame)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                break
-
-    else:
-        # Add start time and current time, so it doesn't run yolo each frame
-        first_run = True
-        start_time = time.time()
-        
-        while True:
-            shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
-            ret, frame_orig = video.read()
-            if not ret:
-                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                continue
-            
-            frame = frame_orig.copy()
-
-            
-            curr_time = time.time()
-            time_elapsed = curr_time - start_time
-            if time_elapsed >= 1 or first_run:
-                start_time = curr_time
-                spots = None
-                spots = run_yolo(frame_orig)
-                checked = check_spots(spots, shapes)
-                first_run = False
+    # Caso seja video
+    if images_path is None:
+        if drawing_mode == 1:
+            while True:
+                ret, frame = video.read()
+                cv2.namedWindow("image")
+                cv2.setMouseCallback("image", click_and_crop)
+                if not ret:
+                    # If the video ends, reset the video capture to the beginning
+                    video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
                 
-            draw_shapes(frame, shapes, colors)
-            draw_counter(total_spots, occupied_spots)
-            draw_spots(frame, spots)
-            cv2.imshow("image", frame)
-            frame = None
-            key = cv2.waitKey(1) & 0xFF
+                shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
+                draw_shapes(frame, shapes, colors)
+                draw_counter(total_spots, occupied_spots)
+                draw_drawing_lines(frame, drawing_lines)
 
-            if key == ord("q"):
-                break
+                cv2.imshow("image", frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord("q"):
+                    break
 
-    video.release()
-    cv2.destroyAllWindows()
+        else:
+            # Add start time and current time, so it doesn't run yolo each frame
+            first_run = True
+            start_time = time.time()
+            
+            while True:
+                shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
+                ret, frame_orig = video.read()
+                if not ret:
+                    video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    continue
+                
+                frame = frame_orig.copy()
+
+                
+                curr_time = time.time()
+                time_elapsed = curr_time - start_time
+                if time_elapsed >= 3 or first_run:
+                    start_time = curr_time
+                    spots = None
+                    spots = run_yolo(frame_orig)
+                    checked = check_spots(spots, shapes)
+                    first_run = False
+                    
+                draw_shapes(frame, shapes, colors)
+                draw_counter(total_spots, occupied_spots)
+                # draw_spots(frame, spots)
+                cv2.imshow("image", frame)
+                frame = None
+                key = cv2.waitKey(1) & 0xFF
+
+                if key == ord("q"):
+                    break
+
+        video.release()
+        cv2.destroyAllWindows()
+    
+    #  Caso sejam imagens e nao video
+    else:
+        # img_path = "parking_spot_detection/images/2012-10-29_06_37_53.jpg"
+        for img_path in images_path:
+            if drawing_mode == 1:
+                while True:
+                    frame = cv2.imread(img_path)
+                    cv2.namedWindow("image")
+                    cv2.setMouseCallback("image", click_and_crop)
+
+                    shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
+                    draw_shapes(frame, shapes, colors)
+                    draw_counter(total_spots, occupied_spots)
+                    draw_drawing_lines(frame, drawing_lines)
+
+                    cv2.imshow("image", frame)
+                    key = cv2.waitKey(1) & 0xFF
+                    if key == ord("q"):
+                        break
+
+            else:
+                # Add start time and current time, so it doesn't run yolo each frame
+                first_run = True
+                start_time = time.time()
+                
+                while True:
+                    shapes, colors, total_spots, occupied_spots = get_shapes_from_lot(lot_name)
+                    frame_orig = cv2.imread(img_path)
+                    frame = frame_orig.copy()
+
+                    curr_time = time.time()
+                    time_elapsed = curr_time - start_time
+                    if time_elapsed >= 3 or first_run:
+                        start_time = curr_time
+                        spots = None
+                        spots = run_yolo(frame_orig)
+                        checked = check_spots(spots, shapes)
+                        first_run = False
+                        
+                    draw_shapes(frame, shapes, colors)
+                    draw_counter(total_spots, occupied_spots)
+                    # draw_spots(frame, spots)  # mostra o que o YOLO identificou
+                    cv2.imshow("image", frame)
+                    frame = None
+                    key = cv2.waitKey(1) & 0xFF
+
+                    if key == ord("q"):
+                        break
+
+            video.release()
+            cv2.destroyAllWindows()
+        
 
 
 if __name__ == "__main__":
+    ######## Argumentos para rodar o programa ########
     # -f parking_spot_detection/pklot_video.mp4 -d 1 -n pk1
 
     # ap = argparse.ArgumentParser()
@@ -298,16 +358,29 @@ if __name__ == "__main__":
     #                 help="Draw the rectangles (0: No / 1: Yes)", required=True)
     # ap.add_argument("-n", "--name", type=str, default="",
     #                 help="Name of the parking lot", required=True)
+    # ap.add_argument("-n", "--iamges_path", type=str, default="",
+    #                 help="Name of the parking lot", required=False)
 
     # args = vars(ap.parse_args())
 
+    
+    ######## Argumentos pre-definidos para rodar o programa ########
+    # Remove the comment above and comment the code below to use arguments from terminal
     args = {
         "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video (1).mp4",
-        # "filepath": "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/pklot_video.mp4",
-        "draw": 1,
-        "name": "pk1",
+        "draw": 0,
+        "name": "pk3",
         "webcam": None,
-        "images": True
+        "images": True,
+        "images_path": ["/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_06_45_00.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_07_25_01.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_08_15_02.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_08_35_02.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_09_40_04.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_09_50_04.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_10_55_05.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_12_50_07.jpg",
+                        "/Users/leonardomosimannconti/computer_vision/parking_spot_detection/images_pk3/2013-04-12_14_10_09.jpg"]
     }
 
     main(args)
