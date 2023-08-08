@@ -1,3 +1,5 @@
+# Slides: https://docs.google.com/presentation/d/1ROqLlSL0i8CinPbhkshoKKfHofDw-QMf1JXPLwzKbTI/edit?usp=sharing
+
 ######## Importar as bibliotecas ########
 from ultralytics import YOLO  # Usado para rodar o YOLO de forma rapida e facil
 import cv2  # Usado para trabalhar com imagens
